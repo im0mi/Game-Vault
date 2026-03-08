@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星际冲刺 - 极速火箭车</title>
+    <style>
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-pink: #ff00ff;
+            --neon-purple: #bc13fe;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: #050505;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            width: 450px;
+            height: 700px;
+            box-shadow: 0 0 50px rgba(0, 243, 255, 0.2);
+            border: 2px solid var(--neon-blue);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #000428, #004e92);
+        }
+
+        /* UI 叠加层 */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 10;
+            transition: opacity 0.3s;
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            z-index: 5;
+        }
+
+        .stat-box {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 15px;
+            border-radius: 20px;
+            border: 1px solid var(--neon-blue);
+            font-weight: bold;
+            text-shadow: 0 0 5px var(--neon-blue);
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            background: linear-gradient(45deg, var(--neon-blue), var(--neon-pink));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 5px;
+        }
+
+        p { margin: 10px 0 20px; color: #aaa; }
+
+        button {
+            padding: 12px 40px;
+            font-size: 1.2rem;
+            background: transparent;
+            color: var(--neon-blue);
+            border: 2px solid var(--neon-blue);
+            cursor: pointer;
+            border-radius: 5px;
+            transition: 0.3s;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: var(--neon-blue);
+            color: black;
+            box-shadow: 0 0 20px var(--neon-blue);
+        }
+
+        #fuel-bar-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 10px;
+            background: #222;
+            border-radius: 5px;
+            border: 1px solid #444;
+        }
+
+        #fuel-bar {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #00ff00);
+            border-radius: 5px;
+            transition: width 0.1s;
+        }
+
+        .hidden { display: none !important; }
+
+        /* 玩法说明 */
+        .controls-hint {
+            margin-top: 20px;
+            font-size: 0.8rem;
+            text-align: center;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- 抬头显示 (HUD) -->
+        <div id="hud">
+            <div class="stat-box">得分: <span id="score-val">0</span></div>
+            <div class="stat-box">等级: <span id="level-val">1</span></div>
+        </div>
+
+        <!-- 燃料条 -->
+        <div id="fuel-bar-container">
+            <div id="fuel-bar"></div>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- 开始菜单 -->
+        <div id="start-screen" class="overlay">
+            <h1>ROCKET CAR</h1>
+            <p>穿越陨石带，收集能量，极限冲刺</p>
+            <button onclick="startGame()">开始引擎</button>
+            <div class="controls-hint">
+                [A/D] 或 [←/→] 左右移动<br>
+                [空格键] 射击 (消耗燃料)
+            </div>
+        </div>
+
+        <!-- 游戏结束 -->
+        <div id="game-over-screen" class="overlay hidden">
+            <h1 style="color: var(--neon-pink);">MISSION FAILED</h1>
+            <p>最终得分: <span id="final-score">0</span></p>
+            <button onclick="startGame()">再次尝试</button>
+        </div>
+    </div>
+
+<script>
+    /** @type {HTMLCanvasElement} */
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score-val');
+    const levelEl = document.getElementById('level-val');
+    const fuelBar = document.getElementById('fuel-bar');
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreEl = document.getElementById('final-score');
+
+    canvas.width = 450;
+    canvas.height = 700;
+
+    // 游戏状态
+    let gameActive = false;
+    let score = 0;
+    let level = 1;
+    let fuel = 100;
+    let frameCount = 0;
+    let shake = 0;
+
+    // 游戏对象
+    let player;
+    let obstacles = [];
+    let bullets = [];
+    let particles = [];
+    let powerups = [];
+    let stars = [];
+
+    // 控制
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.code] = true);
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    class Player {
+        constructor() {
+            this.w = 40;
+            this.h = 60;
+            this.x = canvas.width / 2 - this.w / 2;
+            this.y = canvas.height - 100;
+            this.speed = 7;
+            this.color = '#00f3ff';
+            this.lastShot = 0;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+            
+            // 喷火效果
+            if (gameActive) {
+                const fireSize = 10 + Math.random() * 15;
+                const grad = ctx.createLinearGradient(0, 20, 0, 20 + fireSize);
+                grad.addColorStop(0, '#ffcc00');
+                grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(-10, 25);
+                ctx.lineTo(10, 25);
+                ctx.lineTo(0, 25 + fireSize);
+                ctx.fill();
+            }
+
+            // 车身
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.color;
+            
+            // 画一个尖头的火箭车
+            ctx.beginPath();
+            ctx.moveTo(0, -this.h/2); // 顶端
+            ctx.lineTo(this.w/2, this.h/2);
+            ctx.lineTo(-this.w/2, this.h/2);
+            ctx.closePath();
+            ctx.fill();
+
+            // 挡风玻璃
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.fillRect(-8, -10, 16, 15);
+
+            ctx.restore();
+        }
+
+        update() {
+            if (keys['ArrowLeft'] || keys['KeyA']) this.x -= this.speed;
+            if (keys['ArrowRight'] || keys['KeyD']) this.x += this.speed;
+            
+            // 射击
+            if (keys['Space'] && fuel > 5 && Date.now() - this.lastShot > 200) {
+                bullets.push(new Bullet(this.x + this.w/2, this.y));
+                fuel -= 3;
+                this.lastShot = Date.now();
+                shake = 5;
+            }
+
+            // 边界检查
+            if (this.x < 0) this.x = 0;
+            if (this.x > canvas.width - this.w) this.x = canvas.width - this.w;
+        }
+    }
+
+    class Bullet {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.speed = 10;
+            this.r = 4;
+        }
+        draw() {
+            ctx.fillStyle = '#ff00ff';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff00ff';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+            ctx.fill();
+        }
+        update() { this.y -= this.speed; }
+    }
+
+    class Obstacle {
+        constructor() {
+            this.w = 40 + Math.random() * 40;
+            this.h = 30 + Math.random() * 30;
+            this.x = Math.random() * (canvas.width - this.w);
+            this.y = -this.h;
+            this.speed = 3 + level * 0.8;
+            this.hp = Math.ceil(level / 2);
+            this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
+        }
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = this.color;
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x, this.y, this.w, this.h);
+            ctx.fillRect(this.x, this.y, this.w, this.h);
+            
+            // HP显示
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(this.hp, this.x + 5, this.y + 15);
+        }
+        update() { this.y += this.speed; }
+    }
+
+    class PowerUp {
+        constructor() {
+            this.x = Math.random() * (canvas.width - 20);
+            this.y = -20;
+            this.size = 20;
+            this.type = Math.random() > 0.3 ? 'fuel' : 'score';
+            this.speed = 4;
+        }
+        draw() {
+            ctx.fillStyle = this.type === 'fuel' ? '#00ff00' : '#ffff00';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 10, 0, Math.PI*2);
+            ctx.fill();
+        }
+        update() { this.y += this.speed; }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.alpha = 1;
+            this.life = 0.02 + Math.random() * 0.05;
+        }
+        draw() {
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, 4, 4);
+            ctx.globalAlpha = 1;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.alpha -= this.life;
+        }
+    }
+
+    function createStars() {
+        stars = [];
+        for(let i=0; i<100; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2,
+                speed: 1 + Math.random() * 3
+            });
+        }
+    }
+
+    function spawnExplosion(x, y, color) {
+        for(let i=0; i<15; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function startGame() {
+        score = 0;
+        level = 1;
+        fuel = 100;
+        obstacles = [];
+        bullets = [];
+        powerups = [];
+        particles = [];
+        player = new Player();
+        createStars();
+        gameActive = true;
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        requestAnimationFrame(gameLoop);
+    }
+
+    function gameOver() {
+        gameActive = false;
+        finalScoreEl.innerText = score;
+        gameOverScreen.classList.remove('hidden');
+    }
+
+    function gameLoop() {
+        if (!gameActive) return;
+
+        // 清屏 & 震动效果
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (shake > 0) {
+            ctx.translate(Math.random()*shake - shake/2, Math.random()*shake - shake/2);
+            shake *= 0.9;
+        }
+
+        // 绘制背景星空
+        ctx.fillStyle = 'white';
+        stars.forEach(s => {
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+            ctx.fill();
+            s.y += s.speed;
+            if (s.y > canvas.height) s.y = 0;
+        });
+
+        // 玩家逻辑
+        player.update();
+        player.draw();
+
+        // 燃料逻辑
+        fuel -= 0.05;
+        if (fuel <= 0) gameOver();
+        fuelBar.style.width = fuel + '%';
+        fuelBar.style.background = fuel < 30 ? '#ff0000' : 'linear-gradient(90deg, #ff0000, #00ff00)';
+
+        // 生成敌人和道具
+        frameCount++;
+        if (frameCount % Math.max(20, 60 - level * 5) === 0) {
+            obstacles.push(new Obstacle());
+        }
+        if (frameCount % 200 === 0) {
+            powerups.push(new PowerUp());
+        }
+
+        // 子弹逻辑
+        bullets.forEach((b, bi) => {
+            b.update();
+            b.draw();
+            if (b.y < 0) bullets.splice(bi, 1);
+        });
+
+        // 障碍物逻辑
+        obstacles.forEach((ob, oi) => {
+            ob.update();
+            ob.draw();
+
+            // 碰撞检测：玩家 vs 障碍物
+            if (player.x < ob.x + ob.w && player.x + player.w > ob.x &&
+                player.y < ob.y + ob.h && player.y + player.h > ob.y) {
+                spawnExplosion(player.x + player.w/2, player.y + player.h/2, '#ff0000');
+                gameOver();
+            }
+
+            // 碰撞检测：子弹 vs 障碍物
+            bullets.forEach((b, bi) => {
+                if (b.x > ob.x && b.x < ob.x + ob.w && b.y > ob.y && b.y < ob.y + ob.h) {
+                    ob.hp--;
+                    bullets.splice(bi, 1);
+                    spawnExplosion(b.x, b.y, ob.color);
+                    if (ob.hp <= 0) {
+                        obstacles.splice(oi, 1);
+                        score += 10;
+                        if (score % 100 === 0) {
+                            level++;
+                            fuel = Math.min(100, fuel + 20);
+                        }
+                    }
+                }
+            });
+
+            if (ob.y > canvas.height) obstacles.splice(oi, 1);
+        });
+
+        // 道具逻辑
+        powerups.forEach((p, pi) => {
+            p.update();
+            p.draw();
+            if (player.x < p.x + 20 && player.x + player.w > p.x &&
+                player.y < p.y + 20 && player.y + player.h > p.y) {
+                if (p.type === 'fuel') fuel = Math.min(100, fuel + 30);
+                else score += 50;
+                powerups.splice(pi, 1);
+            }
+            if (p.y > canvas.height) powerups.splice(pi, 1);
+        });
+
+        // 粒子逻辑
+        particles.forEach((p, pi) => {
+            p.update();
+            p.draw();
+            if (p.alpha <= 0) particles.splice(pi, 1);
+        });
+
+        // 更新UI
+        scoreEl.innerText = score;
+        levelEl.innerText = level;
+        
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置变换
+        requestAnimationFrame(gameLoop);
+    }
+
+</script>
+</body>
+</html>
